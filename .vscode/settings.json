@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "libelf.h": "c",
+        "elf.h": "c",
+        "gelf.h": "c",
+        "bfd.h": "c"
+    }
+}
