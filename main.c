@@ -1,102 +1,75 @@
+#include "bfd.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <bfd.h>
-#define FILE_NAME "main.c.obj"
-void get_relocation_entries(bfd *abfd, asection *section, asymbol **symbol_table) {
-    long relocation_count;
-    arelent **relocs;
-    long storage_needed;
-    bfd_size_type size;
-
-    // Get the number of relocations in the section
-    relocation_count = bfd_get_reloc_upper_bound(abfd, section);
-    if (relocation_count < 0) {
-        printf("Error getting relocation count.\n");
-        return;
-    } else if (relocation_count == 0) {
-        printf("No relocations found for section: %s\n", section->name);
+const char *inputFileName = "/mnt/c//101_coding/102_esp/112_assorted/101_hi/build/esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj";
+const char *outputFileName = "/mnt/c//101_coding/102_esp/112_assorted/101_hi/build/esp-idf/main/CMakeFiles/__idf_main.dir/output.bin";
+bfd *inputFile,*outputFile;
+void doInit(){
+    bfd_init();
+    inputFile = bfd_openr(inputFileName, NULL);
+    if (!inputFile) {
+        printf("Failed to open input BFD file\n");
         return;
     }
-
-    // Allocate memory for relocation entries
-    relocs = (arelent **) malloc(relocation_count);
-    if (relocs == NULL) {
-        printf("Memory allocation error.\n");
+    if (!bfd_check_format(inputFile, bfd_object)) {
+        printf("Input file is not a valid object file\n");
+        bfd_close(inputFile);
         return;
     }
-
-    // Canonicalize the relocation entries
-    size = bfd_canonicalize_reloc(abfd, section, relocs, symbol_table);
-    if (size < 0) {
-        printf("Error canonicalizing relocations.\n");
-        free(relocs);
+    const char* getTarget =bfd_get_target(inputFile);
+    outputFile = bfd_openw(outputFileName,getTarget);
+    if (!outputFile) {
+        bfd_perror("Failed to create output BFD file");
+        bfd_close(inputFile);
         return;
     }
-
-    // Process each relocation entry
-    for (long i = 0; i < size; i++) {
-        arelent *reloc = relocs[i];
-        printf("Relocation at address: %lx, symbol: %s, addend: %lx\n",
-               reloc->address,
-               (*reloc->sym_ptr_ptr)->name,
-               reloc->addend);
+    if (!bfd_set_format(outputFile, bfd_object)) {
+        bfd_perror("Failed to set format");
     }
-
-    free(relocs);
 }
 
-int main(int argc, char **argv) {
-
-    bfd *abfd;
-    bfd_init();
-
-    // Open the binary file
-    abfd = bfd_openr(FILE_NAME, NULL);
-    if (!abfd) {
-        printf("Failed to open file: %s\n", FILE_NAME);
-        return 1;
+void doCopy(){
+    char*s=malloc(1000);
+    asection* section,*newSection;
+    for(section=inputFile->sections;section!=NULL;section=section->next){
+        // printf("%s\n",section->name);
+        newSection = bfd_make_section_anyway(outputFile, section->name);
+        if (!newSection) {
+            sprintf(s,"Failed to create section %s in output file",section->name);
+            bfd_perror(s);
+            continue;
+        }
+        if (!bfd_set_section_size(newSection, bfd_section_size(section))) {
+            bfd_perror("Failed to set section size");
+            continue;
+        }
+        if (!bfd_set_section_vma(newSection, section->vma)) {
+            bfd_perror("Failed to set section VMA");
+            continue;
+        }
+        if (section->size > 0) {
+            void *sectionData = malloc(section->size);
+            if (!bfd_get_section_contents(inputFile, section, sectionData, 0, section->size)) {
+                bfd_perror("Failed to get section contents");
+                free(sectionData);
+                continue;
+            }
+            if (!bfd_set_section_contents(outputFile, newSection, sectionData, 0, section->size)) {
+                bfd_perror("Failed to write section contents");
+                free(sectionData);
+                continue;
+            }
+            free(sectionData);
+        }
     }
-
-    if (!bfd_check_format(abfd, bfd_object)) {
-        printf("File format not recognized as an object file.\n");
-        bfd_close(abfd);
-        return 1;
+}
+void main() {
+    doInit();
+    doCopy();
+    // char*sectionName=".rodata.app_main.str1.4";
+    // asection *section = bfd_get_section_by_name(inputFile,sectionName);
+    if(!bfd_close(outputFile)){
+        bfd_perror("closing");
     }
-
-    // Get the upper bound on the symbol table size
-    long symtab_storage = bfd_get_symtab_upper_bound(abfd);
-    if (symtab_storage < 0) {
-        printf("Error getting symbol table size.\n");
-        bfd_close(abfd);
-        return 1;
-    }
-
-    // Allocate memory for the symbol table
-    asymbol **symbol_table = (asymbol **) malloc(symtab_storage);
-    if (symbol_table == NULL) {
-        printf("Memory allocation error.\n");
-        bfd_close(abfd);
-        return 1;
-    }
-
-    // Canonicalize the symbol table
-    long num_symbols = bfd_canonicalize_symtab(abfd, symbol_table);
-    if (num_symbols < 0) {
-        printf("Error canonicalizing symbol table.\n");
-        free(symbol_table);
-        bfd_close(abfd);
-        return 1;
-    }
-
-    // Iterate through sections and get relocation entries
-    for (asection *section = abfd->sections; section != NULL; section = section->next) {
-        printf("Section: %s\n", section->name);
-        get_relocation_entries(abfd, section, symbol_table);
-    }
-
-    // Cleanup
-    free(symbol_table);
-    bfd_close(abfd);
-
-    return 0;
+    return;
 }

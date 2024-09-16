@@ -23,10 +23,10 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Clean up the build (remove the executable and object files)
-# clean:
-# 	rm -f $(OBJS) $(TARGET)
 clean:
-	del /Q $(subst /,\,$(OBJS)) $(subst /,\,$(TARGET))
+	rm -f $(OBJS) $(TARGET)
+# clean:
+# 	del /Q $(subst /,\,$(OBJS)) $(subst /,\,$(TARGET))
 
 # Phony targets (these targets do not correspond to actual files)
 .PHONY: clean
