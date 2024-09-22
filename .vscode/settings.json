@@ -3,6 +3,21 @@
         "libelf.h": "c",
         "elf.h": "c",
         "gelf.h": "c",
-        "bfd.h": "c"
-    }
+        "bfd.h": "c",
+        "string.h": "c",
+        "xtensa.h": "c",
+        "libbfd.h": "c",
+        "sysdep.h": "c",
+        "tc-xtensa.h": "c",
+        "plugin.h": "c",
+        "iostream": "cpp",
+        "typeinfo": "c",
+        "unistd.h": "c",
+        "stdlib.h": "c"
+    },
+    "debug.openDebug": "neverOpen",
+    // "debug.console.openOnFirstSessionStart": false
+    "debug.internalConsoleOptions": "neverOpen"
+
+
 }

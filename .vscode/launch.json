@@ -24,7 +24,7 @@
             // ],
             "preLaunchTask": "build",
             // "miDebuggerPath": "C:/mingw/bin/gdb.exe",
-            "internalConsoleOptions": "openOnSessionStart",
+            "internalConsoleOptions": "neverOpen",// "openOnSessionStart",
             "setupCommands": []
         }
     ],

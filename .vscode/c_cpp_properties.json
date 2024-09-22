@@ -6,7 +6,8 @@
                 "${workspaceFolder}/**",
                 "/usr/include",
                 "/usr/local/include",
-                "/usr/include/x86_64-linux-gnu"
+                "/usr/include/x86_64-linux-gnu",
+                "/mnt/c/101_coding/binutils/install/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

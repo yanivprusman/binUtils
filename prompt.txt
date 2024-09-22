@@ -1,0 +1,29 @@
+yaniv@PC-ELROM-6-2:/usr/local/xtensa/bin$ ls
+xtensa-elf-addr2line  xtensa-elf-as       xtensa-elf-elfedit  xtensa-elf-gdb-add-index  xtensa-elf-ld      xtensa-elf-nm       xtensa-elf-objdump  xtensa-elf-readelf  xtensa-elf-strings
+xtensa-elf-ar         xtensa-elf-c++filt  xtensa-elf-gdb      xtensa-elf-gprof          xtensa-elf-ld.bfd  xtensa-elf-objcopy  xtensa-elf-ranlib   xtensa-elf-size     xtensa-elf-strip
+yaniv@PC-ELROM-6-2:/usr/local/xtensa/bin$
+can i use these to build my program?
+instead of my make file:
+
+CC = gcc
+
+CFLAGS = -g -O0 
+ 
+LDFLAGS =
+
+TARGET = go
+
+SRCS = main.c 
+
+OBJS = $(SRCS:.c=.o)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)   -lbfd $(LDFLAGS) 
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJS) $(TARGET)
+
+.PHONY: clean
