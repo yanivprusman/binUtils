@@ -1,13 +1,15 @@
 #include "main.h"
 char s[MAX_STRING_SIZE];
 void doInit(){
+	bfd_boolean ok;
 	inputFile = bfd_openr(INPUT_FILE_NAME,NULL);
 	if (inputFile==0){
 		sprintf(s,"Error opening %s\n",INPUT_FILE_NAME);
 		bfd_perror(s);
 		exit(1);
 	}
-	if (!bfd_check_format (inputFile, bfd_object)) {
+	ok = bfd_check_format (inputFile, bfd_object);
+	if (!ok) {
 		printf("Failed to open object file!\n");
 		exit(-1);        
     }
@@ -21,12 +23,12 @@ void findFunctions(){
 	for (int x = 0; x<symCount; x++) {
 		if (strcmp(symbols[x]->name, "puts")==0) {
 			// printf("Changing address for undefined symbol: %s\n", symbols[x]->name);
-			symbols[x]->value = (long unsigned int) ADDRESS_OF_PUTS;
+			symbols[x]->value = (long unsigned int) addressOfPuts;
 		}
 		// printf("%s\n",symbols[x]->name);
 		if (strcmp(symbols[x]->name, "app_main")==0) {
 			// printf("Storing address of symbol: %s!\n", symbols[x]->name);
-			app_main = textStart + symbols[x]->value;
+			app_main = textEspStart + symbols[x]->value;
 		}
 	}
 }
@@ -52,7 +54,6 @@ void relocateSection(bfd*abfd, asection*section){
 	}
 	long relcount = bfd_canonicalize_reloc (abfd, section, relocs , symbols);
 	if (relcount < 0) {
-		// return;
 		bfd_perror("bfd_canonicalize_reloc");
 		exit(EXIT_FAILURE);
 	};
@@ -64,15 +65,20 @@ void relocateSection(bfd*abfd, asection*section){
 			exit(1);
 		}
 		reloc_howto_type *howto = reloc->howto;
-		literalAppMain = bfd_get_section_by_name(abfd,".literal.app_main");
 		symbol = *reloc->sym_ptr_ptr;
-		symbol->value=literalAppMain->vma;symbol->section;
 		printf("Relocation %d: offset=0x%lx, symbol=%s, type=%d %s\n",
 			x, (unsigned long)reloc->address, symbol->name, howto->type, reloc->howto->name);
-		// section->output_section = section;section->output_offset;
-		section->output_section = (*reloc->sym_ptr_ptr)->section;//section->lm
-		// type = bfd_perform_relocation(abfd, reloc, (void*)section->vma, section, NULL, error_message);
+		if (strstr(section->name,TEXT_SUBSTRING)){
+			section->output_section = section; 
+		}else{
+			section->output_section = symbol->section;
+		}
 		type = bfd_perform_relocation(abfd, reloc, (void*)section->contents, section, NULL, error_message);
+		if (type!=bfd_reloc_ok){
+			printf("**************************************************************************************\n");
+			printf("Relocation error: %s\n", error_message[0]);
+			exit(1);
+		}
 	}
 	free (relocs);
 }
@@ -99,36 +105,27 @@ size_t roundUpToMultipleOf(size_t value, size_t size) {
   return r == 0 ? value : value - r + size;
 }
 
-int getMemorySizeAndSetVmaOffsets(bfd *abfd){
-	int rodataSize=0,literalSize=0,textSize=0;
-	rodataStart = 0;
+int getMemorySize(bfd *abfd){
+	int size = 0;
 	for(asection*section = abfd->sections; section!=NULL; section = section->next){
 		if (strstr(section->name,RODATA_SUBSTRING)){
-			section->vma=rodataStart+rodataSize;
-			rodataSize+=section->size;
-			printf("Add Memory for %s\n",section->name);
+			size+=section->size;
+			size=roundUpToMultipleOf(size,ALIGN);
 		} 
 	}
-	rodataSize=roundUpToMultipleOf(rodataSize,ALLIGN);
-	literalStart=rodataSize;
 	for(asection*section = abfd->sections; section!=NULL; section = section->next){
 		if (strstr(section->name,LITERAL_SUBSTRING)){
-			section->vma=literalStart+literalSize;
-			literalSize+=section->size;
-			printf("Add Memory for %s\n",section->name);
-		}
+			size+=section->size;
+			size=roundUpToMultipleOf(size,ALIGN);
+		} 
 	}
-	literalSize=roundUpToMultipleOf(literalSize,ALLIGN);
-	textStart+=literalStart+literalSize;
 	for(asection*section = abfd->sections; section!=NULL; section = section->next){
 		if (strstr(section->name,TEXT_SUBSTRING)){
-			section->vma=textStart+textSize;
-			textSize+=section->size;
-			printf("Add Memory for %s\n",section->name);
-		}
+			size+=section->size;
+			size=roundUpToMultipleOf(size,ALIGN);
+		} 
 	}
-	textSize=roundUpToMultipleOf(textSize,ALLIGN);
-	return rodataSize+literalSize+textSize;
+	return size;
 }
 void setSymbolValue(const char*symbolName,bfd_vma vma){
 	for(int x=0;x<symCount;x++){
@@ -138,56 +135,107 @@ void setSymbolValue(const char*symbolName,bfd_vma vma){
 	}
 }
 
-void putSubSectionsInMemoryAndRelocateTargetVma(bfd *abfd,char* subString,uintptr_t hostStart,uintptr_t targetStart){
-	uintptr_t hostAddress = hostStart;
+void putSubSectionsInMemoryAndSetThereVma(bfd *abfd,char* subString){
 	bfd_boolean test;
+	bfd_boolean ok;
 	for(asection* section = abfd->sections; section!=NULL; section = section->next){
 		if (strstr(section->name,subString)){
-			test = bfd_get_section_contents(abfd,section,(void*)hostAddress,0,section->size);
-			section->contents = (unsigned char *) hostAddress;
-			section->vma+=targetStart;
+			nextMemoryAddress = roundUpToMultipleOf(nextMemoryAddress,ALIGN);
+			nextMemoryAddressEsp = roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+			test = bfd_get_section_contents(abfd,section,(void*)nextMemoryAddress,0,section->size);
+			section->contents = (unsigned char *) nextMemoryAddress;
+			section->lma= section->vma=nextMemoryAddressEsp;
+			ok = bfd_set_section_vma(abfd,section,nextMemoryAddressEsp);
+			// bfd_get_section_lma()
+			if(!ok) {
+				printf("**************************************************************************************\n");
+				bfd_perror("error Setting vma");
+
+			}
+			nextMemoryAddress+=section->size;
+			nextMemoryAddressEsp+=section->size;
 			setSymbolValue(section->name,section->vma);
-			hostAddress+=section->size;
 		}
 	}
 }
 void putAllInMemory(bfd*abfd){
-	int memorySize=	getMemorySizeAndSetVmaOffsets(abfd);
-	memoryStart =(uintptr_t) malloc(memorySize);
-	// uintptr_t memoryStartAligned =roundUpToMultipleOf(memoryStart,ALLIGN);
-	// uintptr_t hostRodataStart 	= rodataStart + memoryStartAligned;
-	// uintptr_t hostLiteralStart	= literalStart + memoryStartAligned;
-	// uintptr_t hostTextStart		= textStart + memoryStartAligned;
-	putSubSectionsInMemoryAndRelocateTargetVma(abfd,RODATA_SUBSTRING,memoryStart+rodataStart,ADDRESS_OF_RODATA);
-	putSubSectionsInMemoryAndRelocateTargetVma(abfd,LITERAL_SUBSTRING,memoryStart+literalStart,ADDRESS_OF_LITERAL);
-	putSubSectionsInMemoryAndRelocateTargetVma(abfd,TEXT_SUBSTRING,memoryStart+textStart,ADDRESS_OF_TEXT);
+	int memorySize=	getMemorySize(abfd);
+	memoryStart = (uintptr_t) malloc(memorySize+ALIGN);
+	memoryStart = roundUpToMultipleOf(memoryStart,ALIGN);
+	memoryStartEsp = 0x4038baa0;//get addresses of memory from esp
+	addressOfPuts  = 0x4200d6cc;//get addresses of functions(puts) from esp
+	nextMemoryAddress = memoryStart;
+	nextMemoryAddressEsp = memoryStartEsp;
+	rodataHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
+	rodataEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	putSubSectionsInMemoryAndSetThereVma(abfd,RODATA_SUBSTRING);
+	literalHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
+	literalEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	putSubSectionsInMemoryAndSetThereVma(abfd,LITERAL_SUBSTRING);
+	textHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
+	textEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	putSubSectionsInMemoryAndSetThereVma(abfd,TEXT_SUBSTRING);
 }
 void process(bfd*abfd){
 	getSymbols(abfd);
 	findFunctions();
 	putAllInMemory(abfd);
+	findFunctions();
 	relocateAll(abfd);
 }
-void outputSectionBin(asection* section){
-	FILE *f = fopen(OUTPUT_FILE_NAME,"w");
-	fwrite(section->contents,section->size,1,f);
-	for(int x=0;x<section->size;x++){
-		printf("0x%02x ",*(section->contents+x));
-	}
-	printf("\n");
-}
+// void outputSectionBin(asection* section){
+// 	FILE *f = fopen(OUTPUT_FILE_NAME,"w");
+// 	fwrite(section->contents,section->size,1,f);
+// 	for(int x=0;x<section->size;x++){
+// 		printf("0x%02x ",*(section->contents+x));
+// 	}
+// 	printf("\n");
+// }
 void outputBin(){
 	asection* section;
 	FILE *f = fopen(OUTPUT_FILE_NAME,"w");
-	section = bfd_get_section_by_name(inputFile,".rodata.app_main.str1.4");
-	fwrite(section->contents,section->size,1,f);
-	section = bfd_get_section_by_name(inputFile,".literal.app_main");
-	fwrite(section->contents,section->size,1,f);
-	section = bfd_get_section_by_name(inputFile,".text.app_main");
-	fwrite(section->contents,section->size,1,f);
+	fwrite((void*)memoryStart,nextMemoryAddress-memoryStart,1,f);
+	printf("//Rodata:\n//");
+	for(uintptr_t x=0;x<literalHostStart-rodataHostStart;x++){
+		printf("%c",(unsigned char)*((char*)rodataHostStart + x));
+	};
+	printf("\n");
+	for(uintptr_t x=0;x<literalHostStart-rodataHostStart;x++){
+		printf("0x%02x, ",(unsigned char)*((char*)rodataHostStart + x));
+	};
+	printf("\n");
+	printf("//Literal:");
+	for(uintptr_t x=0;x<textHostStart-literalHostStart;x++){
+		if (!(x%4)) printf("\n");
+		printf("0x%02x, ",(unsigned char)*((char*)literalHostStart + x));
+	};
+	printf("\n");
+	printf("//Text:");
+	for(uintptr_t x=0;x<nextMemoryAddress-textHostStart;x++){
+		if (!(x%3)) printf("\n");
+		printf("0x%02x, ",(unsigned char)*((char*)textHostStart + x));
+	}
+	printf("\n");
+}
+void printSymbols(){
+	printf("Symbols:\n");
+	for (int x = 0; x<symCount; x++) {
+		printf("%s %lx\n",symbols[x]->name,symbols[x]->value);
+	}
+}
+void handle_pc_relative_relocation(bfd *abfd, asection *section, arelent *reloc_entry, bfd_vma pc) {
+    bfd_vma symbol_value;
+    bfd_vma relocation_offset;
+    bfd_vma pc_relative_offset;
+    symbol_value = bfd_asymbol_value(reloc_entry->sym_ptr_ptr[0]);
+    relocation_offset = reloc_entry->address;
+    pc_relative_offset = symbol_value - (pc + relocation_offset);
+    bfd_put_32(abfd, pc_relative_offset, section->contents + relocation_offset);
+    printf("Relocation: Symbol = 0x%lx, PC = 0x%lx, Relocation Offset = 0x%lx\n",
+           (unsigned long)symbol_value, (unsigned long)pc, (unsigned long)relocation_offset);
+    printf("Computed PC-relative offset: 0x%lx\n", (unsigned long)pc_relative_offset);
 }
 void main() {
-	// if (true){
 	if (false){
 		main2();
 		exit(1);
@@ -195,13 +243,7 @@ void main() {
 	doInit();
 	process(inputFile);
 	outputBin();
-	// asection* section;
-	// section = bfd_get_section_by_name(inputFile,".rodata.app_main.str1.4");
-	// outputSectionBin(section);
-	// section = bfd_get_section_by_name(inputFile,".literal.app_main");
-	// outputSectionBin(section);
-	// section = bfd_get_section_by_name(inputFile,".text.app_main");
-	// outputSectionBin(section);
+	printSymbols();
 	printf("Fin\n");
     return;
 }
