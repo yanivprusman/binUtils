@@ -8,7 +8,7 @@
             "name": "C/C++: g++.exe build and debug active file",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/mnt/c/101_coding/105_c/102_elfWsl/go",
+            "program": "/mnt/c/101_coding/105_c/wsl/102_elfWsl/go",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

@@ -19,8 +19,34 @@ void getSymbols(bfd*abfd){
 	symbols = malloc(x);
 	symCount = bfd_canonicalize_symtab(abfd, symbols);
 }
+bool isSymbolInList(char **list, int listSize, const char *symbol) {
+    for (int i = 0; i < listSize; i++) {
+        if (strcmp(list[i], symbol) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void getUndefinedFunctions(){
+    undefinedSymbols.strings = malloc(MAX_UNDEFINED_SYMBOLS * sizeof(char *));
+	const char *symbolName;
+	for (int x = 0; x<symCount; x++) {
+		if (symbols[x]->section == bfd_und_section_ptr) {
+            symbolName = symbols[x]->name;
+            if (!isSymbolInList(undefinedSymbols.strings, undefinedSymbols.count, symbolName)) {
+                undefinedSymbols.strings[undefinedSymbols.count] = strdup(symbolName);
+                undefinedSymbols.count++;
+                printf("Symbol %s is undefined.\n", symbolName);
+            }
+        }
+	}
+}
 void findFunctions(){
 	for (int x = 0; x<symCount; x++) {
+		if (symbols[x]->section == bfd_und_section_ptr) {
+            printf("Symbol %s is undefined.\n", symbols[x]->name);
+        }
 		if (strcmp(symbols[x]->name, "puts")==0) {
 			// printf("Changing address for undefined symbol: %s\n", symbols[x]->name);
 			symbols[x]->value = (long unsigned int) addressOfPuts;
@@ -86,17 +112,13 @@ void relocateSection(bfd*abfd, asection*section){
 void relocateAll(bfd*abfd){
 	for(asection*section = abfd->sections; section!=NULL; section = section->next){
 		if (!(section->flags & SEC_RELOC)) {
-			// Skip sections that don't have relocations
 			continue;
         }
 		if(strstr(section->name,".xt.")){
 			continue;
 		}
 		printf("%s\n",section->name);
-		// section->lma = section->vma = (bfd_vma)section->contents;
-		// if (strcmp(section->name,".text.app_main")==0){ //remove condition
 		relocateSection(inputFile,section);
-		// }
 	}
 }
 
@@ -138,22 +160,39 @@ void setSymbolValue(const char*symbolName,bfd_vma vma){
 void putSubSectionsInMemoryAndSetThereVma(bfd *abfd,char* subString){
 	bfd_boolean test;
 	bfd_boolean ok;
+	bool dRam;
+	if(strcmp(subString,RODATA_SUBSTRING)==0){
+		dRam=true;
+	}else{
+		dRam= false;
+	}
 	for(asection* section = abfd->sections; section!=NULL; section = section->next){
 		if (strstr(section->name,subString)){
 			nextMemoryAddress = roundUpToMultipleOf(nextMemoryAddress,ALIGN);
-			nextMemoryAddressEsp = roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+			if(dRam){
+				nextMemoryAddressDramEsp = roundUpToMultipleOf(nextMemoryAddressDramEsp,ALIGN);
+			}else{
+				nextMemoryAddressIramEsp = roundUpToMultipleOf(nextMemoryAddressIramEsp,ALIGN);
+			}
 			test = bfd_get_section_contents(abfd,section,(void*)nextMemoryAddress,0,section->size);
 			section->contents = (unsigned char *) nextMemoryAddress;
-			section->lma= section->vma=nextMemoryAddressEsp;
-			ok = bfd_set_section_vma(abfd,section,nextMemoryAddressEsp);
-			// bfd_get_section_lma()
+			if(dRam){
+				section->lma= section->vma=nextMemoryAddressDramEsp;
+				ok = bfd_set_section_vma(abfd,section,nextMemoryAddressDramEsp);
+			}else{
+				section->lma= section->vma=nextMemoryAddressIramEsp;
+				ok = bfd_set_section_vma(abfd,section,nextMemoryAddressIramEsp);
+			}
 			if(!ok) {
 				printf("**************************************************************************************\n");
 				bfd_perror("error Setting vma");
-
 			}
 			nextMemoryAddress+=section->size;
-			nextMemoryAddressEsp+=section->size;
+			if(dRam){
+				nextMemoryAddressDramEsp+=section->size;
+			}else{
+				nextMemoryAddressIramEsp+=section->size;
+			}
 			setSymbolValue(section->name,section->vma);
 		}
 	}
@@ -162,26 +201,31 @@ void putAllInMemory(bfd*abfd){
 	int memorySize=	getMemorySize(abfd);
 	memoryStart = (uintptr_t) malloc(memorySize+ALIGN);
 	memoryStart = roundUpToMultipleOf(memoryStart,ALIGN);
-	memoryStartEsp = 0x4038baa0;//get addresses of memory from esp
-	addressOfPuts  = 0x4200d6cc;//get addresses of functions(puts) from esp
+	#ifdef SIMULATE_ADDRESSES
+	memoryDramStartEsp = 0x3c200000; 
+	memoryIramStartEsp = 0x43000000;//get addresses of memory from esp
+	addressOfPuts  = 0x4200edd0 ;//get addresses of functions(puts) from esp
+
+	#endif
 	nextMemoryAddress = memoryStart;
-	nextMemoryAddressEsp = memoryStartEsp;
+	nextMemoryAddressIramEsp = memoryIramStartEsp;
+	nextMemoryAddressDramEsp = memoryDramStartEsp;
 	rodataHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
-	rodataEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	rodataEspStart=roundUpToMultipleOf(nextMemoryAddressIramEsp,ALIGN);
 	putSubSectionsInMemoryAndSetThereVma(abfd,RODATA_SUBSTRING);
 	literalHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
-	literalEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	literalEspStart=roundUpToMultipleOf(nextMemoryAddressIramEsp,ALIGN);
 	putSubSectionsInMemoryAndSetThereVma(abfd,LITERAL_SUBSTRING);
 	textHostStart=roundUpToMultipleOf(nextMemoryAddress,ALIGN);
-	textEspStart=roundUpToMultipleOf(nextMemoryAddressEsp,ALIGN);
+	textEspStart=roundUpToMultipleOf(nextMemoryAddressIramEsp,ALIGN);
 	putSubSectionsInMemoryAndSetThereVma(abfd,TEXT_SUBSTRING);
 }
 void process(bfd*abfd){
 	getSymbols(abfd);
-	findFunctions();
 	putAllInMemory(abfd);
-	findFunctions();
-	relocateAll(abfd);
+	getUndefinedFunctions();
+	// findFunctions();
+	// relocateAll(abfd);
 }
 // void outputSectionBin(asection* section){
 // 	FILE *f = fopen(OUTPUT_FILE_NAME,"w");
@@ -193,8 +237,19 @@ void process(bfd*abfd){
 // }
 void outputBin(){
 	asection* section;
-	FILE *f = fopen(OUTPUT_FILE_NAME,"w");
-	fwrite((void*)memoryStart,nextMemoryAddress-memoryStart,1,f);
+	FILE *fData = fopen(DROM_FILE_NAME,"w");
+	if (!fData) {
+        perror("Error opening data file");
+        exit(1);
+    }
+	uintptr_t rodataSize = literalHostStart-rodataHostStart;
+	fwrite((void*)memoryStart,rodataSize,1,fData);
+	FILE *fCode = fopen(IROM_FILE_NAME,"w");
+	if (!fCode) {
+        perror("Error opening data file");
+        exit(1);
+    }
+	fwrite((void*)memoryStart+rodataSize,nextMemoryAddress-memoryStart-rodataSize,1,fCode);
 	printf("//Rodata:\n//");
 	for(uintptr_t x=0;x<literalHostStart-rodataHostStart;x++){
 		printf("%c",(unsigned char)*((char*)rodataHostStart + x));
@@ -242,8 +297,8 @@ void main() {
 	}
 	doInit();
 	process(inputFile);
-	outputBin();
-	printSymbols();
-	printf("Fin\n");
+	// outputBin();
+	// printSymbols();
+	printf("Done\n");
     return;
 }

@@ -16,7 +16,6 @@
         "stdlib.h": "c"
     },
     "debug.openDebug": "neverOpen",
-    // "debug.console.openOnFirstSessionStart": false
     "debug.internalConsoleOptions": "neverOpen"
 
 
